@@ -897,6 +897,13 @@ generate_create_command()
 			--volume /run/user/${container_user_uid}:/run/user/${container_user_uid}${rslave}"
 	fi
 
+	# Mount the X11 socket directory so that X11 display forwarding works
+	# even though /tmp is not shared with the host.
+	if [ -d "/tmp/.X11-unix" ]; then
+		result_command="${result_command}
+			--volume /tmp/.X11-unix:/tmp/.X11-unix:ro"
+	fi
+
 	# These are dynamic configs needed by the container to function properly
 	# and integrate with the host
 	#

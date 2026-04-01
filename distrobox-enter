@@ -744,6 +744,15 @@ if [ "${container_status}" != "running" ]; then
 	printf >&2 "\nContainer Setup Complete!\n"
 fi
 
+# Copy the Xauthority file into the container so X11 auth works.
+# The container has its own /tmp (not shared with host), so the file
+# referenced by XAUTHORITY needs to be placed there explicitly.
+if [ -n "${XAUTHORITY:-}" ] && [ -f "${XAUTHORITY}" ]; then
+	${container_manager} cp "${XAUTHORITY}" "${container_name}:${XAUTHORITY}" 2>/dev/null || :
+	${container_manager} exec --user=root "${container_name}" \
+		chown "$(id -u):$(id -g)" "${XAUTHORITY}" 2>/dev/null || :
+fi
+
 # Generate the exec command and run it
 cmd="$(generate_enter_command | awk '{a[i++]=$0} END {for (j=i-1; j>=0;) print a[j--]}')"
 # Reverse it so we can reverse loop and prepend the command's arguments
