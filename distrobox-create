@@ -82,10 +82,10 @@ init=0
 non_interactive=0
 nvidia=0
 nopasswd=0
-unshare_ipc=0
+unshare_ipc=1
 unshare_groups=0
 unshare_netns=0
-unshare_process=0
+unshare_process=1
 unshare_devsys=0
 
 # Use cd + dirname + pwd so that we do not have relative paths in mount points
@@ -689,9 +689,8 @@ generate_create_command()
 	result_command="${result_command}
 		--hostname \"${container_hostname}\"
 		--name \"${container_name}\"
-		--privileged
+		--cap-add=SYS_ADMIN
 		--security-opt label=disable
-		--security-opt apparmor=unconfined
 		--pids-limit=-1
 		--user root:root"
 
@@ -725,13 +724,10 @@ generate_create_command()
 		--env \"SHELL=$(basename "${SHELL:-"/bin/bash"}")\"
 		--env \"HOME=${container_user_home}\"
 		--env \"container=${container_manager}\"
-		--env \"TERMINFO_DIRS=/usr/share/terminfo:/run/host/usr/share/terminfo\"
+		--env \"TERMINFO_DIRS=/usr/share/terminfo\"
 		--env \"CONTAINER_ID=${container_name}\"
-		--volume /tmp:/tmp${rslave}
 		--volume \"${distrobox_entrypoint_path}\":/usr/bin/entrypoint:ro
-		--volume \"${distrobox_export_path}\":/usr/bin/distrobox-export:ro
-		--volume \"${distrobox_hostexec_path}\":/usr/bin/distrobox-host-exec:ro
-		--volume \"${container_user_home}\":\"${container_user_home}\"${rslave}"
+		--volume \"${distrobox_export_path}\":/usr/bin/distrobox-export:ro"
 
 	# Due to breaking change in https://github.com/opencontainers/runc/commit/d4b670fca6d0ac606777376440ffe49686ce15f4
 	# now we cannot mount /:/run/host as before, as it will try to mount RO partitions as RW thus breaking things.
@@ -751,18 +747,18 @@ generate_create_command()
 				tr ',' '\n' | grep -q "^ro$"; then
 
 				result_command="${result_command}
-				--volume ${rootdir}:/run/host${rootdir}:ro${rslave}"
+				--volume ${rootdir}:/run/host${rootdir}:ro${rslave:+,${rslave#:}}"
 				continue
 			fi
 
-			# Else we mount it RW+Rslave
+			# Mount it as RO+Rslave for filesystem isolation
 			result_command="${result_command}
-				--volume ${rootdir}:/run/host${rootdir}${rslave}"
+				--volume ${rootdir}:/run/host${rootdir}:ro${rslave:+,${rslave#:}}"
 		done
 	else
-		# We're either on podman+crun, docker or lilipod, let's keep old behaviour
+		# We're either on podman+crun, docker or lilipod, mount host root as read-only
 		result_command="${result_command}
-			--volume /:/run/host/${rslave}"
+			--volume /:/run/host/:ro${rslave:+,${rslave#:}}"
 
 	fi
 
@@ -891,15 +887,6 @@ generate_create_command()
 			--env \"HOME=${container_user_custom_home}\"
 			--env \"DISTROBOX_HOST_HOME=${container_user_home}\"
 			--volume \"${container_user_custom_home}:${container_user_custom_home}${rslave}\""
-	fi
-
-	# Mount also the /var/home dir on ostree based systems
-	# do this only if $HOME was not already set to /var/home/username
-	if [ "${container_user_home}" != "/var/home/${container_user_name}" ] &&
-		[ -d "/var/home/${container_user_name}" ]; then
-
-		result_command="${result_command}
-			--volume \"/var/home/${container_user_name}\":\"/var/home/${container_user_name}\"${rslave}"
 	fi
 
 	# Mount also the XDG_RUNTIME_DIR to ensure functionality of the apps.

@@ -1854,25 +1854,7 @@ fi
 # Set SHELL to the install path inside the container
 SHELL="$(command -v "${shell_pkg}")"
 
-# Attempt to download host-spawn during init, we don't care if it fails, so let's
-# continue in that case
-/usr/bin/distrobox-host-exec -Y test 2> /dev/null > /dev/null || :
-
-# If xdg-open is not present and we don't have an init system, do a link of it.
-# This is handy to handle opening of links, files and apps from inside the container
-# into the host.
-if [ "${init}" -eq 0 ] && ! command -v xdg-open; then
-	mkdir -p /usr/local/bin/
-	ln -sf /usr/bin/distrobox-host-exec /usr/local/bin/xdg-open
-fi
-
-# If flatpak is not present, do a link of it. This is handy to handle opening of
-# links, files and apps from inside the container into the host.
-# Note: we're using /usr/bin instead of /usr/local/bin because xdg-open will read
-# the desktopfile, which will contain an absolute path of /usr/bin/flatpak
-if ! command -v flatpak; then
-	ln -sf /usr/bin/distrobox-host-exec /usr/bin/flatpak
-fi
+# host-spawn and host-exec are disabled for filesystem isolation
 
 ###############################################################################
 
@@ -2226,25 +2208,7 @@ export SHELL="\$(getent passwd "\${USER}" | cut -f 7 -d :)"
 test -z "\${XDG_RUNTIME_DIR:-}" && export XDG_RUNTIME_DIR="/run/user/\$(id -ru)"
 test -z "\${DBUS_SESSION_BUS_ADDRESS:-}" && export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/\$(id -ru)/bus"
 
-# Ensure we have these two variables from the host, so that graphical apps
-# also work in case we use a login session
-if [ -z "\$XAUTHORITY" ]; then
-    export XAUTHORITY="\$(host-spawn sh -c "printf "%s" \\\$XAUTHORITY")"
-    # if the variable is still empty, unset it, because empty it could be harmful
-    [ -z "\$XAUTHORITY" ] && unset XAUTHORITY
-fi
-if [ -z "\$XAUTHLOCALHOSTNAME" ]; then
-    export XAUTHLOCALHOSTNAME="\$(host-spawn sh -c "printf "%s" \\\$XAUTHLOCALHOSTNAME")"
-    [ -z "\$XAUTHLOCALHOSTNAME" ] && unset XAUTHLOCALHOSTNAME
-fi
-if [ -z "\$WAYLAND_DISPLAY" ]; then
-    export WAYLAND_DISPLAY="\$(host-spawn sh -c "printf "%s" \\\$WAYLAND_DISPLAY")"
-    [ -z "\$WAYLAND_DISPLAY" ] && unset WAYLAND_DISPLAY
-fi
-if [ -z "\$DISPLAY" ]; then
-    export DISPLAY="\$(host-spawn sh -c "printf "%s" \\\$DISPLAY")"
-    [ -z "\$DISPLAY" ] && unset DISPLAY
-fi
+# Display variables (DISPLAY, WAYLAND_DISPLAY, etc.) are forwarded by distrobox-enter
 
 # This will ensure a default prompt for a container, this will be remineshent of
 # toolbx prompt: https://github.com/containers/toolbox/blob/main/profile.d/toolbox.sh#L47
@@ -2277,25 +2241,7 @@ if status --is-interactive
 	test -z "\$XDG_RUNTIME_DIR && set -gx XDG_RUNTIME_DIR /run/user/(id -ru)
 	test -z "\$DBUS_SESSION_BUS_ADDRESS && set -gx DBUS_SESSION_BUS_ADDRESS unix:path=/run/user/(id -ru)/bus
 
-	# Ensure we have these two variables from the host, so that graphical apps
-	# also work in case we use a login session
-	if test -z \$XAUTHORITY
-		set -gx XAUTHORITY (host-spawn sh -c "printf "%s" \\\$XAUTHORITY")
-		# if the variable is still empty, unset it, because empty it could be harmful
-		test -z \$XAUTHORITY ; and set -e XAUTHORITY
-	end
-	if test -z \$XAUTHLOCALHOSTNAME
-		set -gx XAUTHLOCALHOSTNAME (host-spawn sh -c "printf "%s" \\\$XAUTHLOCALHOSTNAME")
-		test -z \$XAUTHLOCALHOSTNAME ; and set -e XAUTHLOCALHOSTNAME
-	end
-	if test -z \$WAYLAND_DISPLAY
-		set -gx WAYLAND_DISPLAY (host-spawn sh -c "printf "%s" \\\$WAYLAND_DISPLAY")
-		test -z \$WAYLAND_DISPLAY ; and set -e WAYLAND_DISPLAY
-	end
-	if test -z \$DISPLAY
-		set -gx DISPLAY (host-spawn sh -c "printf "%s" \\\$DISPLAY")
-		test -z \$DISPLAY ; and set -e DISPLAY
-	end
+	# Display variables (DISPLAY, WAYLAND_DISPLAY, etc.) are forwarded by distrobox-enter
 
 	# This will ensure we have a first-shell password setup for an user if needed.
 	# We're going to use this later in case of rootful containers
@@ -2554,6 +2500,12 @@ if [ "$(getent passwd "${container_user_name}" | cut -d: -f6)" != "${container_u
 	fi
 fi
 
+# Ensure the home directory exists (host home is not mounted for filesystem isolation)
+if [ ! -d "${container_user_home}" ]; then
+	mkdir -p "${container_user_home}"
+	chown "${container_user_uid}":"${container_user_gid}" "${container_user_home}"
+fi
+
 # If we're rootless, delete password for root and user
 if [ ! -e /etc/passwd.done ]; then
 	printf "distrobox: Ensuring user's access...\n"
@@ -2631,7 +2583,7 @@ chmod 0400 /etc/gshadow 2> /dev/null || :
 ###############################################################################
 
 ###############################################################################
-if [ -n "${DISTROBOX_HOST_HOME-}" ] && [ -d "/etc/skel" ]; then
+if [ -d "/etc/skel" ]; then
 	printf "distrobox: Setting up skel...\n"
 
 	# If we do not have profile files in the home, we should copy the
@@ -2668,12 +2620,16 @@ if [ -n "${init_hook}" ]; then
 fi
 ###############################################################################
 
-HOST_WATCH="
-	/etc/hostname
-	/etc/hosts
-	/etc/localtime
-	/etc/resolv.conf
-"
+###############################################################################
+# Remove host filesystem access after setup is complete.
+# NVIDIA drivers, themes, fonts, and sockets have already been set up above.
+# Mount an empty tmpfs over /run/host to hide host filesystem from users.
+# This is simpler and safer than recursive unmount of complex mount trees.
+printf "distrobox: Removing host filesystem access...\n"
+if [ -d /run/host ]; then
+	mount -t tmpfs tmpfs /run/host 2>/dev/null || :
+fi
+###############################################################################
 id="${CONTAINER_ID:-}"
 if [ -e /run/.containerenv ]; then
 	# shellcheck disable=SC1091,SC2034
@@ -2690,47 +2646,11 @@ fi
 # For non-init containers, the init will stop here
 if [ "${init}" -eq 0 ]; then
 	printf "container_setup_done\n"
-	# Keepalive loop
-	# disable verbose logging for this phase.
+	# Keepalive loop -- /run/host is unmounted so no host file sync needed.
+	# Network config (resolv.conf, hosts) are bind-mounted read-only from create.
 	set +x
 	while true; do
-		# Let's check for changes every 15 seconds.
-		# This way we can dynamically keep hosts, dns and timezone setups
-		# in sync with host, without having permissions problems:
-		#	- symlink will fail with "Device or Resource busy"
-		#	- bindmount will need a container restart on changes
-		for file_watch in ${HOST_WATCH}; do
-			# do stuff, only if the file is a mountpoint, and if the mountpoint is NOT containing the
-			# container id, because if it does, it is because it's part of the podman/docker setup
-			# The mount point might not exist, either because it's umounted or it doesn't exist on
-			# host in some cases like /etc/localtime, so ignore findmnt errors
-			mount_source="$(findmnt -no SOURCE "${file_watch}")" || :
-			if [ -n "${mount_source}" ] && ! echo "${mount_source}" | grep -q "${id}"; then
-				file_watch_src="/run/host${file_watch}"
-				# check if the target file exists
-				if ls -l "${file_watch_src}" 2> /dev/null > /dev/null; then
-					# if it's a symlink and take the source
-					if [ -L "${file_watch_src}" ]; then
-						file_watch_src="$(init_readlink "/run/host${file_watch}")"
-						# if it's an absolute link, we need to append /run/host ourselves.
-						if ! printf "%s" "${file_watch_src}" | grep -q "/run/host"; then
-							file_watch_src="/run/host${file_watch_src}"
-						fi
-					fi
-					if ! diff "${file_watch}" "${file_watch_src}" > /dev/null; then
-						# We only do this, if the file is actually different
-						umount "${file_watch}" &&
-							mount_bind "${file_watch_src}" "${file_watch}"
-
-						# Let's keep in sync host's hostname and container's hostname
-						if [ "${file_watch}" = "/etc/hostname" ]; then
-							hostname "$(cat /etc/hostname)"
-						fi
-					fi
-				fi
-			fi
-		done
-		sleep 15
+		sleep 60
 	done
 fi
 ###############################################################################
@@ -2848,18 +2768,21 @@ if [ -e /usr/lib/systemd/system/user@.service ]; then
 	cat << EOF > /usr/local/bin/user-integration
 #!/bin/sh
 sleep 1
-ln -sf /run/host/run/user/\$(id -ru)/wayland-* /run/user/\$(id -ru)/
-ln -sf /run/host/run/user/\$(id -ru)/pipewire-* /run/user/\$(id -ru)/
-find /run/host/run/user/\$(id -ru)/ -maxdepth 1 -type f -exec sh -c 'grep -qlE COOKIE \$0 && ln -sf \$0 /run/user/\$(id -ru)/\$(basename \$0)' {} \;
-mkdir -p /run/user/\$(id -ru)/app && ln -sf /run/host/run/user/\$(id -ru)/app/* /run/user/\$(id -ru)/app/
-mkdir -p /run/user/\$(id -ru)/at-spi && ln -sf /run/host/run/user/\$(id -ru)/at-spi/* /run/user/\$(id -ru)/at-spi/
-mkdir -p /run/user/\$(id -ru)/dbus-1 && ln -sf /run/host/run/user/\$(id -ru)/dbus-1/* /run/user/\$(id -ru)/dbus-1/
-mkdir -p /run/user/\$(id -ru)/dconf && ln -sf /run/host/run/user/\$(id -ru)/dconf/* /run/user/\$(id -ru)/dconf/
-mkdir -p /run/user/\$(id -ru)/gnupg && ln -sf /run/host/run/user/\$(id -ru)/gnupg/* /run/user/\$(id -ru)/gnupg/
-mkdir -p /run/user/\$(id -ru)/keyring && ln -sf /run/host/run/user/\$(id -ru)/keyring/* /run/user/\$(id -ru)/keyring/
-mkdir -p /run/user/\$(id -ru)/p11-kit && ln -sf /run/host/run/user/\$(id -ru)/p11-kit/* /run/user/\$(id -ru)/p11-kit/
-mkdir -p /run/user/\$(id -ru)/pulse && ln -sf /run/host/run/user/\$(id -ru)/pulse/* /run/user/\$(id -ru)/pulse/
-find /run/user/\$(id -ru) -maxdepth 2 -xtype l -delete
+# Only attempt host integration if /run/host is still available
+if [ -d /run/host/run/user/\$(id -ru) ]; then
+	ln -sf /run/host/run/user/\$(id -ru)/wayland-* /run/user/\$(id -ru)/ 2>/dev/null || :
+	ln -sf /run/host/run/user/\$(id -ru)/pipewire-* /run/user/\$(id -ru)/ 2>/dev/null || :
+	find /run/host/run/user/\$(id -ru)/ -maxdepth 1 -type f -exec sh -c 'grep -qlE COOKIE \$0 && ln -sf \$0 /run/user/\$(id -ru)/\$(basename \$0)' {} \; 2>/dev/null || :
+	mkdir -p /run/user/\$(id -ru)/app && ln -sf /run/host/run/user/\$(id -ru)/app/* /run/user/\$(id -ru)/app/ 2>/dev/null || :
+	mkdir -p /run/user/\$(id -ru)/at-spi && ln -sf /run/host/run/user/\$(id -ru)/at-spi/* /run/user/\$(id -ru)/at-spi/ 2>/dev/null || :
+	mkdir -p /run/user/\$(id -ru)/dbus-1 && ln -sf /run/host/run/user/\$(id -ru)/dbus-1/* /run/user/\$(id -ru)/dbus-1/ 2>/dev/null || :
+	mkdir -p /run/user/\$(id -ru)/dconf && ln -sf /run/host/run/user/\$(id -ru)/dconf/* /run/user/\$(id -ru)/dconf/ 2>/dev/null || :
+	mkdir -p /run/user/\$(id -ru)/gnupg && ln -sf /run/host/run/user/\$(id -ru)/gnupg/* /run/user/\$(id -ru)/gnupg/ 2>/dev/null || :
+	mkdir -p /run/user/\$(id -ru)/keyring && ln -sf /run/host/run/user/\$(id -ru)/keyring/* /run/user/\$(id -ru)/keyring/ 2>/dev/null || :
+	mkdir -p /run/user/\$(id -ru)/p11-kit && ln -sf /run/host/run/user/\$(id -ru)/p11-kit/* /run/user/\$(id -ru)/p11-kit/ 2>/dev/null || :
+	mkdir -p /run/user/\$(id -ru)/pulse && ln -sf /run/host/run/user/\$(id -ru)/pulse/* /run/user/\$(id -ru)/pulse/ 2>/dev/null || :
+	find /run/user/\$(id -ru) -maxdepth 2 -xtype l -delete 2>/dev/null || :
+fi
 EOF
 
 	chmod +x /usr/local/bin/user-integration

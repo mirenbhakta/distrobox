@@ -70,6 +70,14 @@ for dep in ${base_dependencies}; do
 	fi
 done
 
+# Check if the host home directory is accessible (filesystem isolation guard)
+if [ ! -d "${host_home}/.local" ] && [ ! -w "${host_home}" ]; then
+	printf >&2 "Error: Cannot export -- host home directory is not accessible.\n"
+	printf >&2 "This container was created with filesystem isolation (no --share-home).\n"
+	printf >&2 "To export apps/binaries, recreate the container with the host home mounted.\n"
+	exit 1
+fi
+
 # show_help will print usage to stdout.
 # Arguments:
 #   None
