@@ -85,6 +85,17 @@ done
 [ -n "${DBX_CONTAINER_MANAGER}" ] && container_manager="${DBX_CONTAINER_MANAGER}"
 [ -n "${DBX_VERBOSE}" ] && verbose="${DBX_VERBOSE}"
 
+# Look up custom storage configuration for a container
+storage_lookup() {
+	storage_map="${XDG_CONFIG_HOME:-"${HOME}/.config"}/distrobox/storage-map"
+	if [ -f "${storage_map}" ]; then
+		_storage_conf="$(grep "^${1}=" "${storage_map}" | head -1 | cut -d'=' -f2-)"
+		if [ -n "${_storage_conf}" ]; then
+			export CONTAINERS_STORAGE_CONF="${_storage_conf}"
+		fi
+	fi
+}
+
 # Fixup variable=[true|false], in case we find it in the config file(s)
 [ "${verbose}" = "true" ] && verbose=1
 [ "${verbose}" = "false" ] && verbose=0
@@ -198,6 +209,9 @@ if [ "${all}" -ne 0 ]; then
 	done
 	exit
 fi
+
+# Look up custom storage for this container
+storage_lookup "${container_name}"
 
 # If we delete, just ask confirmation and exit.
 if [ "${delete}" -ne 0 ]; then

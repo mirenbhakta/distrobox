@@ -71,6 +71,18 @@ The `upperdir` and `workdir` directories must exist before creating the containe
 
 If you don't specify `--home` or mount a volume for the home directory, the container's home lives inside podman's container storage layer (typically `~/.local/share/containers/storage/overlay/`). Files there persist across stop/start but are deleted when you `distrobox rm` the container.
 
+## Isolated storage on a secondary drive
+
+You can put a container's entire storage — images, overlays, and home — on a separate drive or path using `--storage-root`:
+
+```sh
+distrobox create --name sandbox --image fedora:39 --storage-root /mnt/secondary/@sandbox
+```
+
+This creates an isolated podman storage instance that doesn't touch the host's default container storage. All other commands (enter, stop, rm, list) work normally without extra flags.
+
+See [sandbox-on-secondary-drive.md](sandbox-on-secondary-drive.md) for full setup instructions including SELinux and btrfs snapshot tips.
+
 ## Known limitations
 
 - **Wayland is untested** and likely does not work out of the box. The X11 socket mount approach won't help on a Wayland session.

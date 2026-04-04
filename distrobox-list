@@ -228,6 +228,30 @@ fi
 # between a normal container and a distrobox one.
 container_list=$(${container_manager} ps -a --no-trunc --format \
 	"{{.ID}}|{{.Image}}|{{.Names}}|{{.Status}}|{{.Labels}}{{.Mounts}}")
+
+# Also collect containers from custom storage locations
+storage_map="${XDG_CONFIG_HOME:-"${HOME}/.config"}/distrobox/storage-map"
+if [ -f "${storage_map}" ]; then
+	_seen_confs=""
+	while IFS='=' read -r _sname _sconf; do
+		[ -z "${_sname}" ] && continue
+		[ -z "${_sconf}" ] && continue
+		# Deduplicate by storage.conf path
+		case "${_seen_confs}" in
+			*"|${_sconf}|"*) continue ;;
+		esac
+		_seen_confs="${_seen_confs}|${_sconf}|"
+		if [ -f "${_sconf}" ]; then
+			_extra_list=$(CONTAINERS_STORAGE_CONF="${_sconf}" ${container_manager} ps -a --no-trunc --format \
+				"{{.ID}}|{{.Image}}|{{.Names}}|{{.Status}}|{{.Labels}}{{.Mounts}}" 2>/dev/null || true)
+			if [ -n "${_extra_list}" ]; then
+				container_list="${container_list}
+${_extra_list}"
+			fi
+		fi
+	done < "${storage_map}"
+fi
+
 printf "%-12s | %-20s | %-18s | %-30s\n" \
 	"ID" "NAME" "STATUS" "IMAGE"
 IFS='

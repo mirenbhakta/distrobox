@@ -109,6 +109,26 @@ if [ "$(id -ru)" -ne 0 ]; then
 	distrobox_sudo_program=${DBX_SUDO_PROGRAM:-${distrobox_sudo_program:-"sudo"}}
 fi
 
+# Look up custom storage configuration for a container
+storage_lookup() {
+	storage_map="${XDG_CONFIG_HOME:-"${HOME}/.config"}/distrobox/storage-map"
+	if [ -f "${storage_map}" ]; then
+		_storage_conf="$(grep "^${1}=" "${storage_map}" | head -1 | cut -d'=' -f2-)"
+		if [ -n "${_storage_conf}" ]; then
+			export CONTAINERS_STORAGE_CONF="${_storage_conf}"
+		fi
+	fi
+}
+
+# Remove a container's entry from the storage map
+storage_map_remove() {
+	storage_map="${XDG_CONFIG_HOME:-"${HOME}/.config"}/distrobox/storage-map"
+	if [ -f "${storage_map}" ]; then
+		_tmp="$(grep -v "^${1}=" "${storage_map}" || true)"
+		printf "%s\n" "${_tmp}" > "${storage_map}"
+	fi
+}
+
 # Declare it AFTER config sourcing because we do not want a default name set for rm.
 container_name_default="my-distrobox"
 container_name_list=""
@@ -346,6 +366,8 @@ cleanup_exports()
 delete_container()
 {
 	container_name="$1"
+	# Look up custom storage for this container
+	storage_lookup "${container_name}"
 	# Inspect the container we're working with.
 	container_status="$(${container_manager} inspect --type container \
 		--format '{{.State.Status}}' "${container_name}" || :)"
@@ -391,6 +413,14 @@ delete_container()
 	printf "Removing container...\n"
 	# shellcheck disable=SC2086,SC2248
 	${container_manager} rm ${force_flag} --volumes "${container_name}"
+
+	# Clean up storage mapping and warn about remaining storage root data
+	if [ -n "${CONTAINERS_STORAGE_CONF:-}" ]; then
+		storage_map_remove "${container_name}"
+		_storage_root_dir="$(dirname "${CONTAINERS_STORAGE_CONF}")"
+		printf >&2 "Note: Container storage data remains at %s\n" "${_storage_root_dir}"
+		printf >&2 "To fully clean up, manually remove: %s\n" "${_storage_root_dir}"
+	fi
 
 	# Remove exported apps and bins
 	cleanup_exports "${container_name}"

@@ -72,6 +72,7 @@ container_name=""
 container_name_default="my-distrobox"
 container_hostname=""
 container_pre_init_hook=""
+container_storage_root=""
 container_user_custom_home=""
 container_user_gid="$(id -rg)"
 container_user_home="${HOME:-"/"}"
@@ -157,6 +158,7 @@ fi
 [ -n "${DBX_NON_INTERACTIVE}" ] && non_interactive="${DBX_NON_INTERACTIVE}"
 [ -n "${DBX_VERBOSE}" ] && verbose="${DBX_VERBOSE}"
 [ -n "${DBX_USERNS_NOLIMIT}" ] && userns_nolimit="${DBX_USERNS_NOLIMIT}"
+[ -n "${DBX_CONTAINER_STORAGE_ROOT}" ] && container_storage_root="${DBX_CONTAINER_STORAGE_ROOT}"
 
 # Fixup variable=[true|false], in case we find it in the config file(s)
 [ "${non_interactive}" = "true" ] && non_interactive=1
@@ -211,6 +213,8 @@ Options:
 				this will be useful to either rename an existing distrobox or have multiple copies
 				of the same environment.
 	--home/-H:		select a custom HOME directory for the container. Useful to avoid host's home littering with temp files.
+	--storage-root:		path for isolated podman storage (images, overlays, runtime).
+				Creates storage.conf and directory structure, auto-sets --home. Podman only.
 	--volume:		additional volumes to add to the container
 	--additional-flags/-a:	additional flags to pass to the container manager command
 	--additional-packages/-ap:	additional packages to install during initial container setup
@@ -383,6 +387,13 @@ while :; do
 			if [ -n "$2" ]; then
 				# Remove trailing slashes
 				container_user_custom_home="$(echo "$2" | sed 's:/*$::')"
+				shift
+				shift
+			fi
+			;;
+		--storage-root)
+			if [ -n "$2" ]; then
+				container_storage_root="$(echo "$2" | sed 's:/*$::')"
 				shift
 				shift
 			fi
@@ -587,6 +598,43 @@ if [ -n "${container_additional_volumes}" ]; then
 	done
 fi
 
+# Handle --storage-root: set up isolated podman storage on a separate path
+if [ -n "${container_storage_root}" ]; then
+	# --storage-root is only supported with podman
+	case "${container_manager}" in
+		*podman*) ;;
+		*)
+			printf >&2 "Error: --storage-root is only supported with podman.\n"
+			exit 1
+			;;
+	esac
+
+	# Create directory structure
+	mkdir -p "${container_storage_root}/storage/root"
+	mkdir -p "${container_storage_root}/storage/run"
+	mkdir -p "${container_storage_root}/home"
+
+	container_storage_conf="${container_storage_root}/storage.conf"
+
+	# Write storage.conf if it doesn't already exist
+	if [ ! -f "${container_storage_conf}" ]; then
+		cat > "${container_storage_conf}" << STORAGEEOF
+[storage]
+driver = "overlay"
+graphroot = "${container_storage_root}/storage/root"
+runroot = "${container_storage_root}/storage/run"
+STORAGEEOF
+	fi
+
+	# Auto-set --home if the user didn't explicitly provide one
+	if [ -z "${container_user_custom_home}" ]; then
+		container_user_custom_home="${container_storage_root}/home"
+	fi
+
+	# Point this podman invocation at the isolated storage
+	export CONTAINERS_STORAGE_CONF="${container_storage_conf}"
+fi
+
 # Check that we have a complete distrobox installation or
 # entrypoint and export will not work.
 if [ -z "${distrobox_entrypoint_path}" ] || [ -z "${distrobox_export_path}" ]; then
@@ -718,9 +766,15 @@ generate_create_command()
 	# Mount also the distrobox-init utility as the container entrypoint.
 	# Also mount in the container the distrobox-export and distrobox-host-exec
 	# utilities.
+	if [ -n "${container_storage_root}" ]; then
+		_storage_label="
+			--label \"distrobox.storage_conf=${container_storage_conf}\""
+	else
+		_storage_label=""
+	fi
 	result_command="${result_command}
 		--label \"manager=distrobox\"
-		--label \"distrobox.unshare_groups=${unshare_groups}\"
+		--label \"distrobox.unshare_groups=${unshare_groups}\"${_storage_label}
 		--env \"SHELL=$(basename "${SHELL:-"/bin/bash"}")\"
 		--env \"HOME=${container_user_home}\"
 		--env \"container=${container_manager}\"
@@ -1088,6 +1142,16 @@ if eval ${cmd} > /dev/null; then
 	# If user is logged as root OR it's a rootless container.
 	elif [ "${container_user_uid}" -eq 0 ] || [ "${rootful}" -eq 0 ]; then
 		printf "distrobox enter %s\n\n" "${container_name}"
+	fi
+
+	# Record storage mapping so other distrobox commands can find this container
+	if [ -n "${container_storage_root}" ]; then
+		storage_map="${XDG_CONFIG_HOME:-"${HOME}/.config"}/distrobox/storage-map"
+		mkdir -p "$(dirname "${storage_map}")"
+		printf "%s=%s\n" "${container_name}" "${container_storage_conf}" >> "${storage_map}"
+		printf >&2 "\nStorage root: %s\n" "${container_storage_root}"
+		printf >&2 "NOTE: After the first enter (image pull), you may need to relabel for SELinux:\n"
+		printf >&2 "  sudo chcon -R -t container_file_t %s/storage/root/\n\n" "${container_storage_root}"
 	fi
 
 	# We've created the box, let's also create the entry

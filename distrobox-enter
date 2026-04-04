@@ -71,6 +71,17 @@ cleanup()
 	fi
 }
 
+# Look up custom storage configuration for a container
+storage_lookup() {
+	storage_map="${XDG_CONFIG_HOME:-"${HOME}/.config"}/distrobox/storage-map"
+	if [ -f "${storage_map}" ]; then
+		_storage_conf="$(grep "^${1}=" "${storage_map}" | head -1 | cut -d'=' -f2-)"
+		if [ -n "${_storage_conf}" ]; then
+			export CONTAINERS_STORAGE_CONF="${_storage_conf}"
+		fi
+	fi
+}
+
 # Despite of running this script via SUDO/DOAS being not supported (the
 # script itself will call the appropriate tool when necessary), we still want
 # to allow people to run it as root, logged in in a shell, and create rootful
@@ -292,6 +303,9 @@ fi
 if [ -z "${container_name}" ]; then
 	container_name="${container_name_default}"
 fi
+
+# Look up custom storage for this container (must happen before any podman calls)
+storage_lookup "${container_name}"
 
 if [ ! -t 0 ] || [ ! -t 1 ]; then
 	headless=1

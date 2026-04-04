@@ -109,6 +109,17 @@ fi
 
 [ -n "${DBX_SUDO_PROGRAM}" ] && distrobox_sudo_program="${DBX_SUDO_PROGRAM}"
 
+# Look up custom storage configuration for a container
+storage_lookup() {
+	storage_map="${XDG_CONFIG_HOME:-"${HOME}/.config"}/distrobox/storage-map"
+	if [ -f "${storage_map}" ]; then
+		_storage_conf="$(grep "^${1}=" "${storage_map}" | head -1 | cut -d'=' -f2-)"
+		if [ -n "${_storage_conf}" ]; then
+			export CONTAINERS_STORAGE_CONF="${_storage_conf}"
+		fi
+	fi
+}
+
 # show_help will print usage to stdout.
 # Arguments:
 #   None
@@ -290,6 +301,7 @@ case "${response}" in
 	y | Y | Yes | yes | YES)
 		# Stop the container
 		for container_name in ${container_name_list}; do
+			storage_lookup "${container_name}"
 			${container_manager} stop "${container_name}"
 		done
 		;;
