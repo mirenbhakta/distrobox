@@ -36,8 +36,14 @@ Any writable directory works — btrfs is not required.
 ### 2. Create the container
 
 ```bash
-distrobox create --name sandbox --image fedora:39 --storage-root /mnt/2-860evo-1tb/@sandbox
+distrobox create --name sandbox --image registry.opensuse.org/opensuse/tumbleweed \
+  --storage-root /mnt/2-860evo-1tb/@sandbox --hostname sandbox
 ```
+
+Using `--hostname sandbox` gives the container a distinct hostname. KWin (and other
+EWMH-compliant window managers) append the hostname to the titlebar of windows from
+a different machine, so sandbox windows will show `<@sandbox>` in their title — a
+visual indicator similar to Sandboxie's window tagging.
 
 This automatically:
 - Creates `storage/root/`, `storage/run/`, `home/` under the storage root
@@ -71,6 +77,22 @@ distrobox stop sandbox
 distrobox list          # shows containers from all storage roots
 distrobox rm sandbox    # removes container, prints cleanup instructions for storage data
 ```
+
+## Identifying sandbox windows
+
+When `--hostname sandbox` is used, KWin automatically appends `<@sandbox>` to the
+titlebar of any GUI application launched from the container. This works because the
+container has its own UTS namespace with a different hostname than the host, and X11
+clients set `WM_CLIENT_MACHINE` to their hostname. KWin displays this suffix when it
+differs from the host.
+
+No additional scripts, color schemes, or window rules are needed.
+
+> **Note:** KWin 6 supports per-window titlebar color schemes via `decocolor` in
+> `kwinrulesrc`, but as of KWin 6.6.3 on X11 the Breeze decoration does not visually
+> apply them. If this is fixed in a future release, you could add a colored titlebar
+> for sandbox windows by creating a KWin window rule matching
+> `clientmachine=sandbox`.
 
 ## What lives where
 

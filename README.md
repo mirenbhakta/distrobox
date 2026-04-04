@@ -76,8 +76,12 @@ If you don't specify `--home` or mount a volume for the home directory, the cont
 You can put a container's entire storage — images, overlays, and home — on a separate drive or path using `--storage-root`:
 
 ```sh
-distrobox create --name sandbox --image fedora:39 --storage-root /mnt/secondary/@sandbox
+distrobox create --name sandbox --image fedora:39 --storage-root /mnt/secondary/@sandbox --hostname sandbox
 ```
+
+Using `--hostname sandbox` causes KWin to append `<@sandbox>` to the titlebar of GUI
+apps launched from the container, making it easy to tell sandbox windows apart from
+host windows.
 
 This creates an isolated podman storage instance that doesn't touch the host's default container storage. All other commands (enter, stop, rm, list) work normally without extra flags.
 

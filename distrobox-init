@@ -30,24 +30,19 @@ trap '[ "$?" -ne 0 ] && printf "Error: An error occurred\n"' EXIT
 # Github issue: https://github.com/containers/podman/issues/20728
 exec 2>&1
 
-# We'll also bind mount READ-WRITE useful mountpoints to pass external drives and libvirt from
-# the host to the container
+# We'll also bind mount READ-WRITE useful mountpoints from the host to the container.
+# Host drives (/mnt, /media, /run/media, /var/mnt) and libvirt sockets are excluded
+# to keep the container isolated from host storage.
 HOST_MOUNTS="
 	/etc/host.conf
 	/etc/machine-id
-	/media
-	/mnt
-	/run/libvirt
-	/run/media
 	/run/netconfig/
 	/run/systemd/journal
 	/run/systemd/resolve/
 	/run/systemd/seats
 	/run/systemd/sessions
 	/run/systemd/users
-	/run/udev
-	/var/lib/libvirt
-	/var/mnt"
+	/run/udev"
 
 # We'll also bind mount in READ-ONLY useful directories from the host
 HOST_MOUNTS_RO="
@@ -2206,6 +2201,11 @@ test -z "\$EUID" && readonly EUID="\$(id -u  2> /dev/null)"
 export SHELL="\$(getent passwd "\${USER}" | cut -f 7 -d :)"
 
 test -z "\${XDG_RUNTIME_DIR:-}" && export XDG_RUNTIME_DIR="/run/user/\$(id -ru)"
+
+# Include host terminfo so the container recognizes the host's terminal type
+if [ -d "/usr/share/host-terminfo" ]; then
+    export TERMINFO_DIRS="/usr/share/host-terminfo:\${TERMINFO_DIRS:-/usr/share/terminfo}"
+fi
 test -z "\${DBUS_SESSION_BUS_ADDRESS:-}" && export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/\$(id -ru)/bus"
 
 # Display variables (DISPLAY, WAYLAND_DISPLAY, etc.) are forwarded by distrobox-enter

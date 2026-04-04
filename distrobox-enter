@@ -561,6 +561,12 @@ generate_enter_command()
 	result_command="${result_command}
 		--env=XDG_CONFIG_DIRS=${container_paths}"
 
+	# Set TERMINFO_DIRS so the container recognizes the host's terminal type
+	# before /etc/profile runs tset. The host terminfo is mounted read-only
+	# at /usr/share/host-terminfo by distrobox-create.
+	result_command="${result_command}
+		--env=TERMINFO_DIRS=/usr/share/host-terminfo:/usr/share/terminfo"
+
 	# re-enable logging if it was enabled previously.
 	if [ "${verbose}" -ne 0 ]; then
 		set -o xtrace

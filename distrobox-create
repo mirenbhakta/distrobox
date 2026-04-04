@@ -958,6 +958,13 @@ generate_create_command()
 			--volume /tmp/.X11-unix:/tmp/.X11-unix:ro"
 	fi
 
+	# Mount host terminfo so the container recognizes the host's terminal type
+	# (e.g. alacritty). Read-only since the container never needs to modify these.
+	if [ -d "/usr/share/terminfo" ]; then
+		result_command="${result_command}
+			--volume /usr/share/terminfo:/usr/share/host-terminfo:ro"
+	fi
+
 	# These are dynamic configs needed by the container to function properly
 	# and integrate with the host
 	#
