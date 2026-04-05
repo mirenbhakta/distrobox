@@ -525,39 +525,43 @@ export_application()
 	# create applications dir if not existing
 	mkdir -p "${apps_dir}"
 
-	# copy icons in home directory
+	# Copy icons to the export destination.
+	# In isolated mode, skip this entirely — the .desktop file keeps the
+	# original icon name so the host's icon theme resolves it.
 	icon_file_absolute_path=""
-	IFS="¤"
-	for icon_file in ${icon_files}; do
-		if [ -z "${icon_file}" ]; then
-			continue
-		fi
+	if [ "${isolated}" -eq 0 ]; then
+		IFS="¤"
+		for icon_file in ${icon_files}; do
+			if [ -z "${icon_file}" ]; then
+				continue
+			fi
 
-		# replace canonical paths with equivalent paths in HOME
-		icon_home_directory="$(dirname "${icon_file}" |
-			sed "s|/usr/share/|${icons_base}/|g" |
-			sed "s|/var/lib/flatpak/exports/share|${icons_base}/|g" |
-			sed "s|pixmaps|icons|g")"
+			# replace canonical paths with equivalent paths in HOME
+			icon_home_directory="$(dirname "${icon_file}" |
+				sed "s|/usr/share/|${icons_base}/|g" |
+				sed "s|/var/lib/flatpak/exports/share|${icons_base}/|g" |
+				sed "s|pixmaps|icons|g")"
 
-		# check if we're exporting an icon which is not in a canonical path
-		if [ "${icon_home_directory}" = "$(dirname "${icon_file}")" ]; then
-			icon_home_directory="${icons_base}/icons/"
-			icon_file_absolute_path="${icon_home_directory}$(basename "${icon_file}")"
-		fi
+			# check if we're exporting an icon which is not in a canonical path
+			if [ "${icon_home_directory}" = "$(dirname "${icon_file}")" ]; then
+				icon_home_directory="${icons_base}/icons/"
+				icon_file_absolute_path="${icon_home_directory}$(basename "${icon_file}")"
+			fi
 
-		# check if we're exporting or deleting
-		if [ "${exported_delete}" -ne 0 ]; then
-			# we need to remove, not export
-			rm -rf "${icon_home_directory:?}"/"$(basename "${icon_file:?}")"
-			continue
-		fi
+			# check if we're exporting or deleting
+			if [ "${exported_delete}" -ne 0 ]; then
+				# we need to remove, not export
+				rm -rf "${icon_home_directory:?}"/"$(basename "${icon_file:?}")"
+				continue
+			fi
 
-		# we wanto to export the application's icons
-		mkdir -p "${icon_home_directory}"
-		if [ ! -e "${icon_home_directory}/$(basename "${icon_file}")" ] && [ -e "$(realpath "${icon_file}")" ]; then
-			cp -rf "$(realpath "${icon_file}")" "${icon_home_directory}"
-		fi
-	done
+			# we wanto to export the application's icons
+			mkdir -p "${icon_home_directory}"
+			if [ ! -e "${icon_home_directory}/$(basename "${icon_file}")" ] && [ -e "$(realpath "${icon_file}")" ]; then
+				cp -rf "$(realpath "${icon_file}")" "${icon_home_directory}"
+			fi
+		done
+	fi
 
 	# create desktop files for the distrobox
 	IFS="¤"
@@ -594,21 +598,20 @@ export_application()
 			printf "StartupWMClass=%s\n" "${exported_app}" >> "\
 ${apps_dir}/${desktop_home_file}"
 		fi
-		# In case of an icon in a non canonical path, we need to replace the path
-		# in the desktop file.
-		if [ -n "${icon_file_absolute_path}" ]; then
-			sed -i "s|Icon=.*|Icon=${icon_file_absolute_path}|g" \
+		# Rewrite icon paths to point to the exported copies.
+		# In isolated mode, leave Icon= as-is (icon name only) so the
+		# host's icon theme resolves it when the file is copied over.
+		if [ "${isolated}" -eq 0 ]; then
+			if [ -n "${icon_file_absolute_path}" ]; then
+				sed -i "s|Icon=.*|Icon=${icon_file_absolute_path}|g" \
+					"${apps_dir}/${desktop_home_file}"
+				continue
+			fi
+			sed -i "s|Icon=/usr/share/|Icon=${icons_base}/|g" \
 				"${apps_dir}/${desktop_home_file}"
-			# we're done, go to next
-			continue
+			sed -i "s|pixmaps|icons|g" \
+				"${apps_dir}/${desktop_home_file}"
 		fi
-
-		# In case of an icon in a canonical path, but specified as an absolute
-		# we need to replace the path in the desktop file.
-		sed -i "s|Icon=/usr/share/|Icon=${icons_base}/|g" \
-			"${apps_dir}/${desktop_home_file}"
-		sed -i "s|pixmaps|icons|g" \
-			"${apps_dir}/${desktop_home_file}"
 	done
 
 	# Update the desktop files database to ensure exported applications will
