@@ -446,7 +446,7 @@ generate_enter_command()
 	# and needs to stay that way to use custom home dirs. or it will be too talkative.
 	result_command="${result_command}
 		$(printenv | grep '=' | grep -Ev '"|`|\$' |
-		grep -Ev '^(CONTAINER_ID|FPATH|HOST|HOSTNAME|HOME|PATH|PROFILEREAD|PWD|SHELL|XDG_SEAT|XDG_VTNR|XDG_.*_DIRS|^_)' |
+		grep -Ev '^(CONTAINER_ID|DBUS_SESSION_BUS_ADDRESS|FPATH|HOST|HOSTNAME|HOME|PATH|PROFILEREAD|PWD|SHELL|XDG_SEAT|XDG_VTNR|XDG_.*_DIRS|^_)' |
 		sed 's/ /\ /g' | sed 's/^\(.*\)$/--env=\1/g')"
 
 	# Start with the $PATH set in the container's config

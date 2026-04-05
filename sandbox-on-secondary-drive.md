@@ -78,6 +78,27 @@ distrobox list          # shows containers from all storage roots
 distrobox rm sandbox    # removes container, prints cleanup instructions for storage data
 ```
 
+## D-Bus isolation
+
+For init=0 containers (the default), distrowalled starts a container-local D-Bus
+session bus so that D-Bus activated services work inside the container. This means:
+
+- **Service activation works**: programs like Thunar can auto-start their D-Bus
+  services (xfconfd, tumblerd, etc.) without manual workarounds.
+- **File dialogs stay sandboxed**: XDG portal file pickers use the container's
+  D-Bus, so they see the container's filesystem — not the host's.
+- **Audio/video unaffected**: PipeWire, PulseAudio, X11, and Wayland use their
+  own sockets and are not routed through D-Bus.
+- **Host notifications isolated**: the container does not send desktop
+  notifications to the host.
+
+The container's D-Bus socket is at `/tmp/dbus-session-<UID>`. The profile
+automatically sets `DBUS_SESSION_BUS_ADDRESS` to point to it.
+
+> **Note:** `dbus-daemon` must be installed in the container. On openSUSE,
+> install `dbus-1-daemon`. It is not included in the minimal distrobox image
+> by default.
+
 ## Identifying sandbox windows
 
 When `--hostname sandbox` is used, KWin automatically appends `<@sandbox>` to the

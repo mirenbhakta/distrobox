@@ -2206,7 +2206,14 @@ test -z "\${XDG_RUNTIME_DIR:-}" && export XDG_RUNTIME_DIR="/run/user/\$(id -ru)"
 if [ -d "/usr/share/host-terminfo" ]; then
     export TERMINFO_DIRS="/usr/share/host-terminfo:\${TERMINFO_DIRS:-/usr/share/terminfo}"
 fi
-test -z "\${DBUS_SESSION_BUS_ADDRESS:-}" && export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/\$(id -ru)/bus"
+# Prefer the container-local D-Bus session bus (started by distrobox-init for
+# init=0 containers) so that D-Bus service activation works for container apps.
+# Falls back to the host session bus if the container bus is not available.
+if [ -S "/tmp/dbus-session-\$(id -ru)" ]; then
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=/tmp/dbus-session-\$(id -ru)"
+elif [ -z "\${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/\$(id -ru)/bus"
+fi
 
 # Display variables (DISPLAY, WAYLAND_DISPLAY, etc.) are forwarded by distrobox-enter
 
@@ -2239,7 +2246,11 @@ if status --is-interactive
 	set -gx SHELL (getent passwd "\$USER" | cut -f 7 -d :)
 
 	test -z "\$XDG_RUNTIME_DIR && set -gx XDG_RUNTIME_DIR /run/user/(id -ru)
-	test -z "\$DBUS_SESSION_BUS_ADDRESS && set -gx DBUS_SESSION_BUS_ADDRESS unix:path=/run/user/(id -ru)/bus
+	if test -S "/tmp/dbus-session-(id -ru)"
+		set -gx DBUS_SESSION_BUS_ADDRESS "unix:path=/tmp/dbus-session-(id -ru)"
+	else if test -z "\$DBUS_SESSION_BUS_ADDRESS"
+		set -gx DBUS_SESSION_BUS_ADDRESS "unix:path=/run/user/(id -ru)/bus"
+	end
 
 	# Display variables (DISPLAY, WAYLAND_DISPLAY, etc.) are forwarded by distrobox-enter
 
@@ -2646,6 +2657,23 @@ fi
 #
 # For non-init containers, the init will stop here
 if [ "${init}" -eq 0 ]; then
+	# Start a container-local D-Bus session bus so that D-Bus activated
+	# services (xfconfd, tumblerd, etc.) work inside the container.
+	# Audio (PipeWire/Pulse), display (X11/Wayland), and other host services
+	# use their own sockets and are not affected.
+	container_dbus_socket="/tmp/dbus-session-${container_user_uid}"
+	if command -v dbus-daemon > /dev/null 2>&1; then
+		rm -f "${container_dbus_socket}"
+		if runuser -u "${container_user_name}" -- \
+			dbus-daemon --session \
+				--address="unix:path=${container_dbus_socket}" \
+				--fork --print-pid > /dev/null 2>&1; then
+			printf "distrobox: Started container D-Bus session bus\n"
+		else
+			printf "distrobox: Warning: Failed to start container D-Bus session bus\n"
+		fi
+	fi
+
 	printf "container_setup_done\n"
 	# Keepalive loop -- /run/host is unmounted so no host file sync needed.
 	# Network config (resolv.conf, hosts) are bind-mounted read-only from create.
