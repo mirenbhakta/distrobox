@@ -567,6 +567,20 @@ generate_enter_command()
 	result_command="${result_command}
 		--env=TERMINFO_DIRS=/usr/share/host-terminfo:/usr/share/terminfo"
 
+	# Set DBUS_SESSION_BUS_ADDRESS: prefer the container's own session bus
+	# (started by distrobox-init for isolated containers), fall back to the
+	# host's session bus. This ensures D-Bus service activation works for
+	# both interactive shells and desktop shortcut launches (which don't
+	# source the login profile).
+	container_dbus_socket="/tmp/dbus-session-$(id -ru)"
+	if ${container_manager} exec "${container_name}" test -S "${container_dbus_socket}" 2>/dev/null; then
+		result_command="${result_command}
+			--env=DBUS_SESSION_BUS_ADDRESS=unix:path=${container_dbus_socket}"
+	elif [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+		result_command="${result_command}
+			--env=DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS}"
+	fi
+
 	# re-enable logging if it was enabled previously.
 	if [ "${verbose}" -ne 0 ]; then
 		set -o xtrace
