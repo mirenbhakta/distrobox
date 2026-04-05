@@ -70,12 +70,22 @@ for dep in ${base_dependencies}; do
 	fi
 done
 
-# Check if the host home directory is accessible (filesystem isolation guard)
-if [ ! -d "${host_home}/.local" ] && [ ! -w "${host_home}" ]; then
-	printf >&2 "Error: Cannot export -- host home directory is not accessible.\n"
-	printf >&2 "This container was created with filesystem isolation (no --share-home).\n"
-	printf >&2 "To export apps/binaries, recreate the container with the host home mounted.\n"
-	exit 1
+# Detect filesystem isolation: if /run/host home is not accessible, export
+# to the container's own home instead. The user can then manually copy the
+# desktop files/binaries to the host.
+isolated=0
+export_prefix="/run/host${host_home}"
+apps_dir="${export_prefix}/.local/share/applications"
+icons_base="${export_prefix}/.local/share"
+if [ ! -d "${export_prefix}/.local" ] && [ ! -w "${export_prefix}" ]; then
+	isolated=1
+	export_prefix="${HOME}/exports"
+	apps_dir="${export_prefix}"
+	icons_base="${export_prefix}"
+	dest_path="${HOME}/exports/bin"
+	mkdir -p "${apps_dir}" "${dest_path}"
+	printf "Note: Host home not accessible (filesystem isolation).\n"
+	printf "Exporting to %s\n\n" "${export_prefix}"
 fi
 
 # show_help will print usage to stdout.
@@ -513,7 +523,7 @@ export_application()
 	done
 
 	# create applications dir if not existing
-	mkdir -p "/run/host${host_home}/.local/share/applications"
+	mkdir -p "${apps_dir}"
 
 	# copy icons in home directory
 	icon_file_absolute_path=""
@@ -525,13 +535,13 @@ export_application()
 
 		# replace canonical paths with equivalent paths in HOME
 		icon_home_directory="$(dirname "${icon_file}" |
-			sed "s|/usr/share/|\/run\/host\/${host_home}/.local/share/|g" |
-			sed "s|/var/lib/flatpak/exports/share|\/run\/host\/${host_home}/.local/share/|g" |
+			sed "s|/usr/share/|${icons_base}/|g" |
+			sed "s|/var/lib/flatpak/exports/share|${icons_base}/|g" |
 			sed "s|pixmaps|icons|g")"
 
 		# check if we're exporting an icon which is not in a canonical path
 		if [ "${icon_home_directory}" = "$(dirname "${icon_file}")" ]; then
-			icon_home_directory="${host_home}/.local/share/icons/"
+			icon_home_directory="${icons_base}/icons/"
 			icon_file_absolute_path="${icon_home_directory}$(basename "${icon_file}")"
 		fi
 
@@ -561,8 +571,8 @@ export_application()
 
 		# check if we're exporting or deleting
 		if [ "${exported_delete}" -ne 0 ]; then
-			rm -f "/run/host${host_home}/.local/share/applications/${desktop_original_file}"
-			rm -f "/run/host${host_home}/.local/share/applications/${desktop_home_file}"
+			rm -f "${apps_dir}/${desktop_original_file}"
+			rm -f "${apps_dir}/${desktop_home_file}"
 			# we're done, go to next
 			continue
 		fi
@@ -577,41 +587,48 @@ export_application()
 			sed "/^TryExec=.*/d" |
 			sed "/^DBusActivatable=true/d" |
 			sed "s|Name.*|&${exported_app_label}|g" \
-				> "/run/host${host_home}/.local/share/applications/${desktop_home_file}"
+				> "${apps_dir}/${desktop_home_file}"
 		# in the end we add the final quote we've opened in the "container_command_prefix"
 
-		if ! grep -q "StartupWMClass" "/run/host${host_home}/.local/share/applications/${desktop_home_file}"; then
+		if ! grep -q "StartupWMClass" "${apps_dir}/${desktop_home_file}"; then
 			printf "StartupWMClass=%s\n" "${exported_app}" >> "\
-/run/host${host_home}/.local/share/applications/${desktop_home_file}"
+${apps_dir}/${desktop_home_file}"
 		fi
 		# In case of an icon in a non canonical path, we need to replace the path
 		# in the desktop file.
 		if [ -n "${icon_file_absolute_path}" ]; then
 			sed -i "s|Icon=.*|Icon=${icon_file_absolute_path}|g" \
-				"/run/host${host_home}/.local/share/applications/${desktop_home_file}"
+				"${apps_dir}/${desktop_home_file}"
 			# we're done, go to next
 			continue
 		fi
 
 		# In case of an icon in a canonical path, but specified as an absolute
 		# we need to replace the path in the desktop file.
-		sed -i "s|Icon=/usr/share/|Icon=/run/host${host_home}/.local/share/|g" \
-			"/run/host${host_home}/.local/share/applications/${desktop_home_file}"
+		sed -i "s|Icon=/usr/share/|Icon=${icons_base}/|g" \
+			"${apps_dir}/${desktop_home_file}"
 		sed -i "s|pixmaps|icons|g" \
-			"/run/host${host_home}/.local/share/applications/${desktop_home_file}"
+			"${apps_dir}/${desktop_home_file}"
 	done
 
 	# Update the desktop files database to ensure exported applications will
 	# show up in the taskbar/desktop menu/whatnot right after running this
 	# script.
-	/usr/bin/distrobox-host-exec --yes update-desktop-database "${host_home}/.local/share/applications" > /dev/null 2>&1 || :
+	if [ "${isolated}" -eq 0 ]; then
+		/usr/bin/distrobox-host-exec --yes update-desktop-database "${host_home}/.local/share/applications" > /dev/null 2>&1 || :
+	fi
 
 	if [ "${exported_delete}" -ne 0 ]; then
 		printf "Application %s successfully un-exported.\nOK!\n" "${exported_app}"
 		printf "%s will disappear from your applications list in a few seconds.\n" "${exported_app}"
 	else
 		printf "Application %s successfully exported.\nOK!\n" "${exported_app}"
-		printf "%s will appear in your applications list in a few seconds.\n" "${exported_app}"
+		if [ "${isolated}" -eq 1 ]; then
+			printf "Desktop file placed in %s\n" "${apps_dir}"
+			printf "Copy it to the host to add it to your application menu.\n"
+		else
+			printf "%s will appear in your applications list in a few seconds.\n" "${exported_app}"
+		fi
 	fi
 }
 
@@ -635,7 +652,7 @@ list_exported_applications()
 	# and only list files that contain the $DISTROBOX_ENTER_PATH.
 	desktop_files=$(
 		# shellcheck disable=SC2086
-		find "/run/host${host_home}/.local/share/applications" -type f -print -o -type l -print 2> /dev/null | sed 's/./\\&/g' |
+		find "${apps_dir}" -type f -print -o -type l -print 2> /dev/null | sed 's/./\\&/g' |
 			xargs -I{} grep -l -e "Exec=.*${DISTROBOX_ENTER_PATH:-"distrobox.*enter"}.*" "{}" | sed 's/./\\&/g' |
 			xargs -I{} printf "%s¤" "{}"
 	)

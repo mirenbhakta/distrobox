@@ -1661,6 +1661,7 @@ EOF
 		bc
 		bzip2
 		curl
+		dbus-1-daemon
 		diffutils
 		findutils
 		glibc-locale

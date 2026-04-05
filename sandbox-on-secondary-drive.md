@@ -95,9 +95,24 @@ session bus so that D-Bus activated services work inside the container. This mea
 The container's D-Bus socket is at `/tmp/dbus-session-<UID>`. The profile
 automatically sets `DBUS_SESSION_BUS_ADDRESS` to point to it.
 
-> **Note:** `dbus-daemon` must be installed in the container. On openSUSE,
-> install `dbus-1-daemon`. It is not included in the minimal distrobox image
-> by default.
+`dbus-1-daemon` is automatically installed as part of the base package set
+for openSUSE containers.
+
+## Exporting applications
+
+`distrobox-export` works in isolated containers but exports to the container's
+own home directory instead of the host's, since the host filesystem is not
+accessible:
+
+```bash
+distrobox-export --app thunar
+# Desktop file placed in ~/exports/
+# Icons copied to ~/exports/icons/
+```
+
+To add the app to your host's application menu, manually copy the desktop file
+from `~/exports/` (inside the container, at `<storage-root>/home/exports/`) to
+`~/.local/share/applications/` on the host.
 
 ## Identifying sandbox windows
 
